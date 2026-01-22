@@ -15,7 +15,11 @@ def parse_gallery_filters(url):
     
     parsed = urllib.parse.urlparse(url)
     # Extract the 'filter' query parameter
-    query_params = urllib.parse.parse_qs(parsed.query)
+    query_string = parsed.query
+    if not query_string and '?' in parsed.fragment:
+        query_string = parsed.fragment.split('?', 1)[1]
+        
+    query_params = urllib.parse.parse_qs(query_string)
     filter_json = query_params.get('filter', [None])[0]
     
     if not filter_json:
