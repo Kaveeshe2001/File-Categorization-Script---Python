@@ -3,128 +3,150 @@ import json
 import shutil
 import urllib.parse
 import requests
+import time
 
-Galery_Url = "https://gallery.isic-archive.com/#!/topWithHeader/onlyHeaderTop/gallery?filter=%5B%22fitzpatrick_skin_type%7CVI%22%2C%22fitzpatrick_skin_type%7CV%22%2C%22fitzpatrick_skin_type%7CIV%22%5D&name="
+# --- CONFIGURATION ---
+Gallery_Url = "https://gallery.isic-archive.com/#!/topWithHeader/onlyHeaderTop/gallery?filter=%5B%22fitzpatrick_skin_type%7CVI%22%2C%22fitzpatrick_skin_type%7CV%22%2C%22fitzpatrick_skin_type%7CIV%22%5D&name="
 
+# UPDATE THESE PATHS IF NEEDED
 Local_Source_Folder = r"D:\3rd sem\Research Ideas\Fitzpatrick IV - VI"
-
 Destination_Folder = r"D:\3rd sem\Research Ideas\Sorted_Skin_Images"
 
-# Extracts filters from the gallery URL and converts them to an ISIC API query.
+
+# --- FUNCTIONS ---
+
 def parse_gallery_filters(url):
-    
     parsed = urllib.parse.urlparse(url)
-    # Extract the 'filter' query parameter
     query_string = parsed.query
     if not query_string and '?' in parsed.fragment:
         query_string = parsed.fragment.split('?', 1)[1]
-        
+    
     query_params = urllib.parse.parse_qs(query_string)
     filter_json = query_params.get('filter', [None])[0]
     
-    if not filter_json:
-        print("No filters found in URL. Fetching all images?")
-        return ""
+    if not filter_json: return ""
     
     try:
         filters = json.loads(filter_json)
-        
         api_conditions = []
         for f in filters:
             if '|' in f:
                 key, val = f.split('|', 1)
-                # Handle spaces in values by quoting them
                 api_conditions.append(f'{key}:"{val}"')
-        
-        full_query = " OR ".join(api_conditions)
-        return full_query
-    except Exception as e:
-        print(f"Error parsing URL filters: {e}")
+        return " OR ".join(api_conditions)
+    except:
         return ""
-    
-# Searches the ISIC Archive API for images matching the query.
-def get_images_from_api(query_string, limit=100):
-    
-    search_url = "https://api.isic-archive.com/api/v2/images/search/"
-    
-    params = {
-        "limit": limit,
-        "query": query_string
-    }
-    
-    print(f"Querying API with: {query_string}...")
-    response = requests.get(search_url, params=params)
-    
-    # Returns a list of image objects
-    if response.status_code == 200:
-        return response.json()
-    else:
-        print(f"API Error: {response.status_code} - {response.text}")
-        return []
 
-# Finds the file locally and moves it.
+def fetch_all_images(query_string):
+    base_url = "https://api.isic-archive.com/api/v2/images/search/"
+    params = {"limit": 100, "query": query_string} 
+    
+    all_results = []
+    next_url = base_url
+    
+    print(f"Contacting API... (This may take a moment)")
+    
+    while next_url:
+        try:
+            if next_url == base_url:
+                response = requests.get(next_url, params=params)
+            else:
+                response = requests.get(next_url)
+            
+            if response.status_code != 200:
+                print(f"Error fetching data: {response.status_code}")
+                break
+                
+            data = response.json()
+            results = data.get('results', [])
+            all_results.extend(results)
+            next_url = data.get('next')
+            
+            print(f"Fetched batch. Total found so far: {len(all_results)}")
+            time.sleep(0.5)
+            
+        except Exception as e:
+            print(f"Connection error: {e}")
+            break
+            
+    return all_results
+
+def determine_category(img_data):
+    metadata = img_data.get('metadata', {})
+    clinical = metadata.get('clinical', {})
+    
+    diag1 = clinical.get('diagnosis_1')
+    
+    if diag1:
+        if "Benign" in diag1:
+            return "Benign"
+        elif "Malignant" in diag1:
+            return "Malignant"
+    
+    # --- FALLBACK LOGIC (Just in case) ---
+    cat = clinical.get('benign_malignant')
+    if cat: return cat
+
+    return "Unknown"
+
 def move_file(image_id, category):
-    #Define filenames
+    if not category: category = "Unknown"
+    category = category.capitalize()
+    
     extensions = ['.jpg', '.jpeg', '.png']
     
-    found = False
     for ext in extensions:
         filename = f"{image_id}{ext}"
-        source_path = os.path.join(Local_Source_Folder, filename)
+        src = os.path.join(Local_Source_Folder, filename)
         
-        if os.path.exists(source_path):
-            # Define destination
-            dest_dir = os.path.join(Destination_Folder, category)
-            if not os.path.exists(dest_dir):
-                os.makedirs(dest_dir)
-                
-            dest_path = os.path.join(dest_dir, filename)
+        if os.path.exists(src):
+            dst_dir = os.path.join(Destination_Folder, category)
+            if not os.path.exists(dst_dir): 
+                os.makedirs(dst_dir)
             
             try:
-                shutil.move(source_path, dest_path)
-                print(f"Moved: {filename} to {dest_dir}")
-                found = True
-                break
+                shutil.move(src, os.path.join(dst_dir, filename))
+                return category 
             except Exception as e:
-                print(f"[ERROR] Could not move {filename}: {e}")
-    
-    if not found:
-        print(f"[NOT FOUND] {image_id} with extensions {extensions}")
-        pass
+                print(f"Error moving {filename}: {e}")
+                
+    return None 
 
-# Main execution
+
+# --- MAIN EXECUTION ---
 if __name__ == "__main__":
-    print("--- ISIC Image Sorter ---")
+    print("--- ISIC Image Sorter Final ---")
     
-    # Parse filters from the gallery URL
-    query_string = parse_gallery_filters(Galery_Url)
+    api_query = parse_gallery_filters(Gallery_Url)
     
-    if query_string:
-        # Fetch images from the API
-        results = get_images_from_api(query_string, limit=1000)
+    if api_query:
+        print(f"Query generated: {api_query}")
         
-        print(f"Found {len(results)} images in ISIC Archive matching your URL.")
-    
-        # Move each image to its category folder
-        for img in results:
-            image_id = img.get("isic_id")
+        all_images = fetch_all_images(api_query)
+        print(f"Total images metadata found: {len(all_images)}")
+        
+        if len(all_images) == 0:
+            print("No images found in API.")
+            exit()
+
+        moved_counts = {"Benign": 0, "Malignant": 0, "Unknown": 0}
+        
+        print("Starting file move...")
+        for img in all_images:
+            image_id = img.get('isic_id')
+            category = determine_category(img)
             
-            # Extract Benign/Malignant status from metadata
-            metadata = img.get('metadata', {}).get('clinical', {})
+            result = move_file(image_id, category)
             
-            category = metadata.get('benign_malignant')
-            
-            # If explicit category is missing, fallback to logic (optional)
-            if not category:
-                category = "Unknown"
-            else:
-                # Capitalize for folder name (benign -> Benign)
-                category = category.capitalize()
-                
-            # Move File
-            if image_id:
-                move_file(image_id, category)
-                
-        print("Sorting complete.")
+            if result:
+                if result not in moved_counts: 
+                    moved_counts[result] = 0
+                moved_counts[result] += 1
+
+        print("\n--- Summary ---")
+        print(f"Benign moved: {moved_counts.get('Benign', 0)}")
+        print(f"Malignant moved: {moved_counts.get('Malignant', 0)}")
+        print(f"Unknown moved: {moved_counts.get('Unknown', 0)}")
+        
     else:
         print("Could not generate a valid query from the URL.")
