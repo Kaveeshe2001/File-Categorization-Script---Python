@@ -57,3 +57,70 @@ def get_images_from_api(query_string, limit=100):
     else:
         print(f"API Error: {response.status_code} - {response.text}")
         return []
+
+# Finds the file locally and moves it.
+def move_file(image_id, category):
+    #Define filenames
+    extensions = ['.jpg', '.jpeg', '.png']
+    
+    found = False
+    for ext in extensions:
+        filename = f"{image_id}{ext}"
+        source_path = os.path.join(Local_Source_Folder, filename)
+        
+        if os.path.exists(source_path):
+            # Define destination
+            dest_dir = os.path.join(Destination_Folder, category)
+            if not os.path.exists(dest_dir):
+                os.makedirs(dest_dir)
+                
+            dest_path = os.path.join(dest_dir, filename)
+            
+            try:
+                shutil.move(source_path, dest_path)
+                print(f"Moved: {filename} to {dest_dir}")
+                found = True
+                break
+            except Exception as e:
+                print(f"[ERROR] Could not move {filename}: {e}")
+    
+    if not found:
+        print(f"[NOT FOUND] {image_id} with extensions {extensions}")
+        pass
+
+# Main execution
+if __name__ == "__main__":
+    print("--- ISIC Image Sorter ---")
+    
+    # Parse filters from the gallery URL
+    query_string = parse_gallery_filters(Galery_Url)
+    
+    if query_string:
+        # Fetch images from the API
+        results = get_images_from_api(query_string, limit=1000)
+        
+        print(f"Found {len(results)} images in ISIC Archive matching your URL.")
+    
+        # Move each image to its category folder
+        for img in results:
+            image_id = img.get("isic_id")
+            
+            # Extract Benign/Malignant status from metadata
+            metadata = img.get('metadata', {}).get('clinical', {})
+            
+            category = metadata.get('benign_malignant')
+            
+            # If explicit category is missing, fallback to logic (optional)
+            if not category:
+                category = "Unknown"
+            else:
+                # Capitalize for folder name (benign -> Benign)
+                category = category.capitalize()
+                
+            # Move File
+            if image_id:
+                move_file(image_id, category)
+                
+        print("Sorting complete.")
+    else:
+        print("Could not generate a valid query from the URL.")
