@@ -18,7 +18,7 @@ def merge_and_split_data(class_name, source_dirs, target_root, split_ratios=(0.7
         class_dir = os.path.join(source_dir, class_name)
         if os.path.exists(class_dir):
             # Extract only valid image files
-            files = [os.path.join(class_dir, f) for f in os.path.listdir(class_dir) 
+            files = [os.path.join(class_dir, f) for f in os.listdir(class_dir) 
                      if f.lower().endswith(('.png', '.jpg', '.jpeg'))]
             all_image_paths.extend(files)
 
